@@ -1,0 +1,306 @@
+---
+title: "Time Series - Homework 3"
+author: "Kristóf Reizinger"
+date: '02-06-2022'
+fontsize: 12pt
+output:
+  #pdf_document: default
+  word_document: default
+geometry: margin=2cm
+editor_options:
+  chunk_output_type: console
+---
+
+## Exercise 2.,
+
+```{r}
+# Calculations
+# VAR
+# coef matrix
+a<-matrix(c(0.1,0.4,0.3,0.2),2,2,byrow = T)
+# squared
+a2<-a%*%a
+# (I-A)^-1*3/5
+3/5*solve(diag(2)-a)
+
+# restriction matrix SVAR
+A0<-matrix(c(1,0,-0.8,1),2,2,byrow=T)
+# coeffcient matrix SVAR
+A<-matrix(c(0.1,0.40,0.22,0.12),2,2,byrow=T)
+# (A0^-1A)^2A0^-1
+(solve(A0)%*%A)%*%(solve(A0)%*%A)%*%solve(A0)
+
+```
+
+
+## Exercise 3.,
+
+```{r, echo=TRUE, fig.height=4, fig.width=11}
+# fix pseudo random number generator
+set.seed(123)
+# calculate roots
+ar2_roots<-polyroot(c(1,-0.9,-0.7))
+# absolute value
+abs(ar2_roots)
+# time horizon
+time<-52
+# generate noise
+noise<-rnorm(time, mean = 0,sd=0.001)
+ar2<-rep(NA, time)
+ar2[1]<-0
+ar2[2]<-0
+# calculate AR2 values
+for(t in 3:time){
+  ar2[t]<-0.9*ar2[t-1]+0.7*ar2[t-2]+noise[t]
+}
+# plot
+plot.ts(ar2, main="AR(2)", ylab="Value")
+
+# first difference
+plot.ts(diff(ar2), main="AR(2) - first difference", ylab="Value")
+
+
+```
+
+
+
+## Exercise 4.,
+
+
+```{r setup,include=FALSE}
+library(readr)
+library(dplyr)
+library(urca)
+library(vars)
+library(aTSA)
+library(forecast)
+library(kableExtra)
+library(stargazer)
+library(AICcmodavg)
+library(tidyr)
+library(dplyr)
+library(broom)
+library(kableExtra)
+library(latex2exp)
+```
+
+I generated two indenpendent and normally distributed noise series with zero mean and standard deviation of one, $\varepsilon_t$ and $\eta_t$. I accumulated these noise series independently to get the random walks $X_t=\sum^{t}_{s=1}\varepsilon_s$ and $Y_t=\sum^{t}_{s=1}\eta_s$. Finally, I created three data sets: ($Y_t$, $X_t$); ($Y_t$, $Y_{t-1}$, $X_t$); and  ($\Delta Y_t$, $\Delta X_t$).
+
+```{r, echo=T}
+set.seed(123) # fix pseudo number generator starting value
+T<-400 # length of the time series
+eps<-rnorm(T,0,1) # epsilon noise
+eta<-rnorm(T,0,1) # eta noise process
+
+X<-c(0,cumsum(eps)) # cumulate noise, RW
+Y<-c(0,cumsum(eta))  # cumulate noise, RW
+
+# create data frames
+#a)
+df<-data.frame(Y_t=Y,X_t=X)
+#b)
+df2<-data.frame(Yt=Y[2:401],Yt_1=Y[1:400],Xt=X[2:401])
+#c)
+df3<-data.frame(dY=diff(Y),dX=diff(X))
+
+```
+
+## Part a.,
+a) Run a regression of $Y_t$ on $X_t$ and a constant. Report the slope coefficient, the associated t-statistic, the R-squared statistic, the estimated ACF of the residuals, and a unit root test result for the residuals.
+
+```{r, echo=T}
+# run regression
+lm.1<- lm(data=df,Y_t~X_t)
+# generate summary statistics
+slm.1<-summary(lm.1)
+# save R2
+r2<-paste0("R-squared:  ", round(slm.1$r.squared,2))
+
+
+# generate output table
+lm.1%>%tidy()%>%as_tibble()%>%
+  mutate(
+    p.value = scales::pvalue(p.value),
+    term = c("Intercept", "X")
+  )%>%
+  # bind_rows(r2)
+  # %>%
+  knitr::kable(
+    type="text",
+  caption = "Exercise 4., Part a)",
+  col.names = c("Predictor", "Coefficient", "Standard error", "T-statistics", "P-value"),
+  digits = c(0, 2, 2, 2, 3),
+  "simple")%>%
+  kable_styling(full_width = F)%>% add_footnote(r2, notation = "none") 
+```
+
+# Discussion:
+The regression output shows that $X_t$ is significant in the model, but the $R^2$ is very small, less than $10\%$. So, the model explains poorly the variance of $Y_t$. This result seems to be reasonable, as $Y_t$ and $X_t$ are independently generated time series. I would not expect a perfect model due to the fact that the data generating processes were independent.
+
+# Plots
+```{r, echo=T, fig.height=4, fig.width=11}
+# time series
+plot.ts(lm.1$residuals, main="Regression residuals - Regression (1)",ylab=c("Value"))
+# ACF
+lm.1.acf<-acf(lm.1$residuals,main="Autocorellation function of the residuals", lag.max = 50)
+# ACF
+lm.1_adft<-adf.test(lm.1$residuals,10)
+```
+
+# Discussion:
+
+I plotted the time series to select the optimal Dickey-Fuller-test, the autocorrelation function of the regression residuals, and I run the ADF-test.
+
+The autocorrelation function shows that the residual process has a long-memory, thus the first $50$ value of the ACF are significant. (Residuals are highly autocorrelated.)
+
+I applied case (2) for testing the existence of unit roots, case (2) means that I compare a random walk without drift ($H_0$), with a stationary process with drift ($H_1$). I decided using this version, because the time series plot does not contain deterministic trend. (It is rather similar to a random walk.)
+
+(Remark: R calculates the Augmented version of the Dickey-Fuller test, where there are three types of null hypothesis, and the second one is what I will look. This is an analogous version we did in class, but "augmented" (= differences are included in the tested models).)
+
+The output of the ADF test indicates the existence unit root(s), as all the p-values are above any general significance levels ($1\%$,$5\%$, and $10\%$), so I cannot reject the null hypothesis that the process is a random walk without drift (second table).
+
+## Part b.,
+b) Run a regression of $Y_t$ on $Y_{t−1}$, $X_t$ and a constant. Report the same statistics as in part a).
+
+
+```{r, echo=T}
+# run regression
+lm.2<- lm(data=df2,Yt~Yt_1+Xt)
+# generate summary statistics
+slm.2<-summary(lm.2)
+# save R2
+r22<-paste0("R-squared:  ", round(slm.2$r.squared,2))
+
+# generate output table
+lm.2%>%tidy()%>%
+  mutate(
+    p.value = scales::pvalue(p.value),
+    term =(c("Intercept", c("Y_t-1","X_t")))
+  )%>%
+  # bind_rows(r2)
+  # %>%
+  knitr::kable(
+    type="text",
+    caption = "Exercise 4., Part b) - Regression (2)",
+    col.names = c("Predictor", "Coefficient", "Standard error", "T-statistics", "P-value"),
+    digits = c(0, 2, 2, 2, 3),
+    "simple")%>%kable_styling() %>%
+    add_footnote(r22, notation = "none") 
+
+```
+
+# Discussion:
+The regression output shows that $Y_t-1$ is almost a perfect predictor for $Y_t$ with $0.99$ coefficient, which is highly significant (the value of the t-statistics is above 100). It is not surprising thus $Y_t-1$ is created by "shifting" the original $Y_t$ time series one period back. 
+
+Moreover, $X_t$ losts its significance and the coefficient became equal with zero. This phenomenon is also not surprising, rather seems to be the case of omitted variable bias. Thus the coefficient of $X_t$ in Part a) was negative, $cor(X_t,Y_{t-1})\approx -0.3$, which means that regression (1) overestimates the coefficient of $X_t$.
+
+Remark: the correlation between $X_t$ and $Y_{t-1}$ is quite large, if I consider that $X_t$ and $Y_t$ are independently generated stochastic processes. But technically, computers use pseudo-random-number generators, which might result higher correlations, than expected.
+
+$R^2=0.98$ the linear regression almost perfectly fits the data.
+
+# Plots
+```{r, echo=T, fig.height=4, fig.width=11}
+# ts plot
+plot.ts(lm.2$residuals, main="Regression (2) residuals",ylab=c("Value"))
+# ACF
+lm.2.acf<-acf(lm.2$residuals,main="Autocorellation function of the residuals", lag.max = 50)
+#ADF
+lm.2_adft<-adf.test(lm.2$residuals,10)
+```
+
+The time series of the regression residuals seems to be white noise, suggesting an adequat model.
+
+Autocorrelation values are insignificant, which also supports that the residual is white noise.
+
+I run the same ADF-test as before, table 2 summarizes the results. All p-values are smaller than $1\%$, so I can reject for all lags the null hypothesis,  which means that the model is a stationary process with drift.
+[Remark: case (2): $H_0$ - random walk without drift , $H_1$-a stationary process with drift.]
+
+## Part c.,
+c) Run a regression of $ΔY_t$ on $ΔX_t$ and a constant. Report the same statistics as in part a).
+
+
+```{r, echo=T}
+# run regression
+lm.3<- lm(data=df3,dY~dX)
+# generate summary statistics
+slm.3<-summary(lm.3)
+# save R2
+r23<-paste0("R-squared:  ", round(slm.3$r.squared,4))
+
+
+# generate output table
+lm.3%>%tidy()%>%as_tibble()%>%
+  mutate(
+    p.value = scales::pvalue(p.value),
+    term = c("Intercept", "dX")
+  )%>%
+  # bind_rows(r2)
+  # %>%
+  knitr::kable(
+    type="text",
+  caption = "Exercise 4., Part c) - Regression (3)",
+  col.names = c("Predictor", "Coefficient", "Standard error", "T-statistics", "P-value"),
+  digits = c(0, 2, 2, 2, 3),
+  "simple")%>% add_footnote(r23, notation = "none") 
+```
+
+# Discussion:
+In regression (3) $X_t$ is insignificant with close to zero coefficient. The reported t-test confirms that the coefficient is statistically equivalent with zero. $R^2$ became also zero. The results mean that the differentiation does not help, if we compare two random walks.
+
+
+```{r, echo=T, fig.height=4, fig.width=11}
+# ts plot
+plot.ts(lm.3$residuals, main="Regression residuals",ylab=c("Value"))
+# ACF
+lm.3.acf<-acf(lm.3$residuals,main="Autocorellation function of the residuals", lag.max = 50)
+# ADF
+lm.3_adft<-adf.test(lm.3$residuals,10)
+```
+
+The plot of the residuals seems to be a white noise process. I do not see any deterministic trend, so I will apply as before the second type ADF-test. ($H_0$ - random walk without drift , $H_1$-a stationary process with drift.)
+
+The autocorrelation values are insignificant for all t (except t=0, it is by definition = 1). So, ACF also suggests that the residuals follow a white noise process.
+
+I run the ADF-test (type 2), and the second table shows  that all p-values are smaller than $1\%$, so I can reject the null hypothesis (for all lags), which means that the model is a stationary process with drift.
+
+## Part d.,
+d) Discuss the results. Based on your findings, what are your general suggestions when modeling the relationships between I(1) time series?
+
+# Discussion
+
+If you are analyzing two time series, which are integrated in order 1, you should be very careful. Regression (1) demonstrated that the coefficient can be highly significant. Without checking the ACF and the unitroots of the process you may apply an inadequate regression. The inadequacy comes from the regression (2), which highlighted that the relationship between $X_t$ and $Y_t$  is not significant (spurious relationship), which arose due to omitting $Y_{t-1}$ from the model.
+
+Bad news is, that poor differentiation did not solve the problem, as I did in part c). Residuals followed a white noise process, there is no unit roots, but the regression could not explain the variance of $Y_t$. But other indicators were promising. All in all, the cointegration test cannot be avoided in a time series study, thus the testing of the ACF and running the ADF-test does not assure that the regression model will be "meaningful" (Coefficient estimate is unbiased and themodel has some explanatory power [non-zero $R^2$]).
+
+The question is how to distinguish 
+
+
+```{r, include=FALSE}
+# johansen- cointegration test
+cointegration <- ca.jo(df, type="trace",ecdet="trend",spec="transitory")
+
+co_out<-summary(cointegration)
+
+
+coint.test(Y,X,nlag = 1)
+coint.test(diff(Y),diff(X),nlag = 1)
+
+
+library(readxl)
+stock_index <- read_excel("C:/Users/Kristof/Downloads/stock_index.xls", 
+    col_types = c("date", "numeric", "numeric"))
+
+Yt<-log(stock_index$`SP Europe 350`)
+Zt<-log(stock_index$SP500)
+
+adf.test(Yt)
+adf.test(Zt)
+
+coint.test(Yt,Zt,nlag = 1)
+
+coint.test(diff(Yt),diff(Zt),nlag = 1)
+
+```
+
+
+
